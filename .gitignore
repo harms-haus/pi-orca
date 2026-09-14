@@ -1,0 +1,5 @@
+node_modules/
+coverage/
+test-artifacts/
+.pi/hindsight.json
+.pi/subagent-tasks/
