@@ -13,9 +13,11 @@ export function registerOrcaTools(pi: ExtensionAPI, options: OrcaToolsOptions = 
   const deps = runOrca ? { runOrca } : {};
   registerOrcaSubagentTool(pi, {
     ...deps,
-    ...(options.validateProfile ? { validateProfile: options.validateProfile } : {}),
+    ...(options.lookupProfile ? { lookupProfile: options.lookupProfile } : {}),
     ...(options.readinessTimeoutsMs ? { readinessTimeoutsMs: options.readinessTimeoutsMs } : {}),
     ...(options.sendProbe ? { sendProbe: options.sendProbe } : {}),
+    ...(options.codexStartDelayMs ? { codexStartDelayMs: options.codexStartDelayMs } : {}),
+    ...(options.codexQuietPoll ? { codexQuietPoll: options.codexQuietPoll } : {}),
   });
   registerOrcaTerminalTool(pi, deps);
   registerOrcaTabsTool(pi, deps);

@@ -3,11 +3,11 @@
   "version": "0.1.0",
   "description": "Pi extension with tools for driving the Orca IDE: profile-configured subagents, terminals, tabs, and the embedded browser",
   "keywords": [
+    "browser",
     "orca",
     "pi-coding-agent",
     "pi-package",
-    "subagent",
-    "browser"
+    "subagent"
   ],
   "license": "MIT",
   "author": "Blake Harms <blake@harms.haus>",

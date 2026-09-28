@@ -9,7 +9,7 @@
  * fake.
  */
 import { OrcaCliError, resolveOrcaCommand, runOrca } from "../src/orca-cli.js";
-import { scanProfileNames, validateProfileName } from "../src/profiles.js";
+import { lookupProfile, scanProfiles } from "../src/profiles.js";
 import { listTerminals, waitOnce } from "../src/tools/terminal.js";
 import { extractTerminalHandle } from "../src/tools/subagent.js";
 import { listBrowserTabs } from "../src/tools/tabs.js";
@@ -22,13 +22,15 @@ async function main(): Promise<void> {
   ok("argv prefix", resolveOrcaCommand());
 
   section("profile scan");
-  const scan = await scanProfileNames();
-  ok("profile count", scan.names.length);
-  const known = scan.names[0];
+  const scan = await scanProfiles();
+  ok("profile count", scan.profiles.length);
+  const nonPi = scan.profiles.filter((p) => p.agent && p.agent !== "pi").map((p) => p.name);
+  ok("non-pi agents", nonPi);
+  const known = scan.profiles[0]?.name;
   if (!known) throw new Error("no profiles found on this machine");
-  const valid = await validateProfileName(known);
+  const valid = await lookupProfile(known);
   if (!valid.ok) throw new Error(`validation failed for existing profile: ${valid.error}`);
-  const invalid = await validateProfileName("definitely-not-a-profile-xyz");
+  const invalid = await lookupProfile("definitely-not-a-profile-xyz");
   if (invalid.ok) throw new Error("validation accepted an unknown profile");
   ok("validation", `${known} ok / unknown rejected`);
 

@@ -20,23 +20,36 @@ pi install -l /path/to/this/repo     # project-local
 
 ### `orca_subagent`
 
-Spawn a pi subagent in a visible Orca terminal tab:
+Spawn a subagent in a visible Orca terminal tab:
 
 ```json
 { "profile": "code-quality-reviewer", "task": "Review …", "wait": true }
 ```
 
-- Launches `pi --agent-profile <profile>` in the chosen worktree, waits for the
-  child to reach idle readiness, then delivers the task.
+- Launches the profile's agent in the chosen worktree, waits for the child
+  to reach idle readiness, then delivers the task.
+- Optional `agent` frontmatter field selects the CLI client that runs the
+  profile: `pi` (default when absent) via `pi --agent-profile <profile>`;
+  `claude` with the profile body as `--append-system-prompt`; `codex` with
+  the body prepended to the first message (frontmatter `model` forwards to
+  `--model` on both).
 - `worktree`: omit for the active worktree, `"new"` for a fresh child worktree,
   or an Orca selector (`path:/repo`, `id:…`, `name:…`).
 - `wait: true` polls until the child goes idle (3s slices, progress streamed)
   and returns its screen output; `timeout_seconds` caps the wait (default 600).
 - The profile name is validated against `~/.pi/agent/profiles` and trusted
-  `.pi/agent/profiles` before anything is spawned — an unknown name fails fast
-  instead of launching a profile-less child.
+  `.pi/agent/profiles` before anything is spawned — an unknown name or an
+  unsupported `agent` value fails fast instead of launching a profile-less
+  child.
 - The child keeps running in Orca regardless; monitor or follow up with
   `orca_terminal`.
+- First-run quirks of the foreign CLIs: claude shows a folder-trust dialog it
+  cannot skip in interactive mode (accept it once per folder — fresh
+  worktrees each need one click); codex readiness is a settle delay and its
+  completion an output-quiet watch, because a freshly launched codex never
+  reports tui-idle at rest (verified on codex 0.158 — turn starts are
+  observed natively via `terminal send --wait-submit`). Fast pi/claude turns
+  can report `send-unverified` with the screen as evidence.
 
 ### `orca_terminal`
 
@@ -66,7 +79,9 @@ browser profiles, splits) stays on the `orca` CLI via bash.
 - Pi ≥ 0.85, Orca ≥ 1.4 with the `orca` CLI available.
 - Binary resolution: `$ORCA_CLI_COMMAND` → `$ORCA_DEV_REPO_ROOT` + `orca-dev`
   → `orca-ide` (Linux outside Orca) → `orca`.
-- For subagents: profiles and provider auth configured as usual for pi.
+- For subagents: profiles and provider auth configured as usual for pi; for
+  `agent: codex`/`agent: claude` profiles, the respective CLI installed and
+  authenticated.
 
 ## Development
 

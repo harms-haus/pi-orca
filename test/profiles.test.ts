@@ -1,67 +1,120 @@
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { parseFrontmatterName, scanProfileNames, validateProfileName } from "../src/profiles.js";
+import { lookupProfile, parseProfileFrontmatter, scanProfiles } from "../src/profiles.js";
 
-describe("parseFrontmatterName", () => {
-  it("reads the name field, quoted or bare", () => {
-    expect(parseFrontmatterName("---\nname: scout\n---\nbody")).toBe("scout");
-    expect(parseFrontmatterName('---\nname: "quoted name"\n---\n')).toBe("quoted name");
-    expect(parseFrontmatterName("---\ntitle: x\n---\n")).toBeUndefined();
-    expect(parseFrontmatterName("no frontmatter")).toBeUndefined();
-    expect(parseFrontmatterName("---\nname:\n---\n")).toBeUndefined();
+describe("parseProfileFrontmatter", () => {
+  it("reads name, agent, and model, quoted or bare, plus the body", () => {
+    expect(
+      parseProfileFrontmatter(
+        '---\nname: scout\nagent: "codex"\nmodel: gpt-6-sol\n---\nYou are a scout.',
+      ),
+    ).toEqual({ name: "scout", agent: "codex", model: "gpt-6-sol", body: "You are a scout." });
+  });
+
+  it("omits absent fields and returns the whole text as body without frontmatter", () => {
+    expect(parseProfileFrontmatter("---\nname: scout\n---\nbody")).toEqual({
+      name: "scout",
+      body: "body",
+    });
+    expect(parseProfileFrontmatter("no frontmatter")).toEqual({ body: "no frontmatter" });
+    expect(parseProfileFrontmatter("---\nname:\n---\n")).toEqual({ body: "" });
+    expect(parseProfileFrontmatter('---\nname: "quoted name"\n---\n')).toEqual({
+      name: "quoted name",
+      body: "",
+    });
   });
 });
 
-describe("scanProfileNames", () => {
-  it("merges global and trusted project dirs", async () => {
+describe("scanProfiles", () => {
+  it("merges global and trusted project dirs, with project shadowing global", async () => {
     const cwd = await mkdtemp(join(tmpdir(), "orca-profiles-"));
     const agentDir = await mkdtemp(join(tmpdir(), "orca-agent-"));
     await mkdir(join(agentDir, "profiles"), { recursive: true });
     await mkdir(join(cwd, ".pi", "agent", "profiles"), { recursive: true });
-    await writeFile(join(agentDir, "profiles", "reviewer.md"), "---\nname: reviewer\n---\n");
+    await writeFile(
+      join(agentDir, "profiles", "reviewer.md"),
+      "---\nname: reviewer\nagent: claude\n---\nYou review code.",
+    );
+    await writeFile(
+      join(agentDir, "profiles", "shadowed.md"),
+      "---\nname: shadowed\n---\nGlobal body.",
+    );
     await writeFile(
       join(cwd, ".pi", "agent", "profiles", "local.md"),
-      "---\nname: local-scout\n---\n",
+      "---\nname: local-scout\nagent: codex\nmodel: gpt-6-sol\n---\nYou scout.",
+    );
+    await writeFile(
+      join(cwd, ".pi", "agent", "profiles", "shadowed.md"),
+      "---\nname: shadowed\n---\nProject body.",
     );
     await writeFile(join(cwd, ".pi", "agent", "profiles", "noname.md"), "no frontmatter");
 
-    const scan = await scanProfileNames({
-      cwd,
-      projectTrusted: true,
-      agentDir,
+    const scan = await scanProfiles({ cwd, projectTrusted: true, agentDir });
+    expect(scan.profiles.map((p) => p.name)).toEqual(["local-scout", "reviewer", "shadowed"]);
+    expect(scan.profiles.find((p) => p.name === "reviewer")).toMatchObject({
+      agent: "claude",
+      body: "You review code.",
     });
-    expect(scan.names).toEqual(["local-scout", "reviewer"]);
+    expect(scan.profiles.find((p) => p.name === "local-scout")).toMatchObject({
+      agent: "codex",
+      model: "gpt-6-sol",
+    });
+    // Project profile with the same name wins.
+    expect(scan.profiles.find((p) => p.name === "shadowed")?.body).toBe("Project body.");
 
     // Untrusted projects contribute nothing.
-    const untrusted = await scanProfileNames({ cwd, projectTrusted: false, agentDir });
-    expect(untrusted.names).toEqual(["reviewer"]);
+    const untrusted = await scanProfiles({ cwd, projectTrusted: false, agentDir });
+    expect(untrusted.profiles.map((p) => p.name)).toEqual(["reviewer", "shadowed"]);
   });
 
   it("ignores a missing home directory without failing", async () => {
-    const scan = await scanProfileNames({
+    const scan = await scanProfiles({
       agentDir: join(homedir(), ".pi", "does-not-exist"),
     });
-    expect(scan.names).toEqual([]);
+    expect(scan.profiles).toEqual([]);
   });
 });
 
-describe("validateProfileName", () => {
-  it("accepts a known name", async () => {
+describe("lookupProfile", () => {
+  it("resolves a known name, defaulting agent to pi", async () => {
     const agentDir = await mkdtemp(join(tmpdir(), "orca-agent-"));
     await mkdir(join(agentDir, "profiles"));
-    await writeFile(join(agentDir, "profiles", "reviewer.md"), "---\nname: reviewer\n---\n");
-    const result = await validateProfileName("reviewer", { agentDir });
-    expect(result.ok).toBe(true);
+    await writeFile(join(agentDir, "profiles", "reviewer.md"), "---\nname: reviewer\n---\nBody.");
+    const result = await lookupProfile("reviewer", { agentDir });
+    expect(result).toEqual({ ok: true, profile: { name: "reviewer", agent: "pi", body: "Body." } });
+  });
+
+  it("normalizes the agent value case-insensitively and forwards the model", async () => {
+    const agentDir = await mkdtemp(join(tmpdir(), "orca-agent-"));
+    await mkdir(join(agentDir, "profiles"));
+    await writeFile(
+      join(agentDir, "profiles", "scout.md"),
+      "---\nname: scout\nagent: Claude\nmodel: opus\n---\nBody.",
+    );
+    const result = await lookupProfile("scout", { agentDir });
+    expect(result.profile).toMatchObject({ agent: "claude", model: "opus" });
+  });
+
+  it("rejects an unknown agent value", async () => {
+    const agentDir = await mkdtemp(join(tmpdir(), "orca-agent-"));
+    await mkdir(join(agentDir, "profiles"));
+    await writeFile(
+      join(agentDir, "profiles", "reviewer.md"),
+      "---\nname: reviewer\nagent: gemini\n---\nBody.",
+    );
+    const result = await lookupProfile("reviewer", { agentDir });
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("agent: 'gemini'");
+    expect(result.error).toContain("pi, codex, claude");
   });
 
   it("rejects an unknown name with suggestions", async () => {
     const agentDir = await mkdtemp(join(tmpdir(), "orca-agent-"));
     await mkdir(join(agentDir, "profiles"));
     await writeFile(join(agentDir, "profiles", "reviewer.md"), "---\nname: reviewer\n---\n");
-    const result = await validateProfileName("reviwer", { agentDir });
+    const result = await lookupProfile("reviwer", { agentDir });
     expect(result.ok).toBe(false);
     expect(result.error).toContain("Unknown profile 'reviwer'");
     expect(result.error).toContain("reviewer");
