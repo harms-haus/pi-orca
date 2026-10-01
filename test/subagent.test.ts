@@ -58,7 +58,13 @@ function scriptedWait(sequence: Array<"READY" | "BUSY">) {
       showCount++;
       return { terminal: { lastOutputAt: showCount === 1 ? 1_000 : 2_000 } };
     }
-    if (args[1] === "read") return { terminal: { tail: ["DONE: 3 findings"], source: "screen" } };
+    if (args[1] === "read")
+      return {
+        terminal: {
+          tail: ["Claude Code", "bypass permissions on", "DONE: 3 findings"],
+          source: "screen",
+        },
+      };
     return {};
   };
   return { runner, calls };
@@ -78,9 +84,47 @@ describe("launchCommand", () => {
     );
   });
 
+  it("forwards codex thinkingLevel as model_reasoning_effort, mapping off to none", () => {
+    expect(
+      launchCommand({
+        name: "c",
+        agent: "codex",
+        model: "gpt-6-sol",
+        thinkingLevel: "high",
+        body: "b",
+      }),
+    ).toBe("codex --model 'gpt-6-sol' -c model_reasoning_effort=high");
+    expect(launchCommand({ name: "c", agent: "codex", thinkingLevel: "off", body: "b" })).toBe(
+      "codex -c model_reasoning_effort=none",
+    );
+  });
+
   it("launches claude with the body as --append-system-prompt, model forwarded", () => {
     expect(launchCommand({ name: "c", agent: "claude", model: "opus", body: "You review." })).toBe(
-      "claude --model 'opus' --append-system-prompt 'You review.'",
+      "claude --dangerously-skip-permissions --model 'opus' --append-system-prompt 'You review.'",
+    );
+  });
+
+  it("forwards claude thinkingLevel as --effort, clamping off/minimal to low", () => {
+    expect(
+      launchCommand({
+        name: "c",
+        agent: "claude",
+        model: "opus",
+        thinkingLevel: "high",
+        body: "r",
+      }),
+    ).toBe(
+      "claude --dangerously-skip-permissions --model 'opus' --effort high --append-system-prompt 'r'",
+    );
+    expect(launchCommand({ name: "c", agent: "claude", thinkingLevel: "off", body: "r" })).toBe(
+      "claude --dangerously-skip-permissions --effort low --append-system-prompt 'r'",
+    );
+    expect(launchCommand({ name: "c", agent: "claude", thinkingLevel: "minimal", body: "r" })).toBe(
+      "claude --dangerously-skip-permissions --effort low --append-system-prompt 'r'",
+    );
+    expect(launchCommand({ name: "c", agent: "claude", thinkingLevel: "max", body: "r" })).toBe(
+      "claude --dangerously-skip-permissions --effort max --append-system-prompt 'r'",
     );
   });
 
@@ -197,7 +241,9 @@ describe("orca_subagent", () => {
     expect(outcome.details.agent).toBe("claude");
 
     const create = calls.find((args) => args[0] === "terminal" && args[1] === "create");
-    expect(create).toContain("claude --append-system-prompt 'You review code.'");
+    expect(create).toContain(
+      "claude --dangerously-skip-permissions --append-system-prompt 'You review code.'",
+    );
     const textSend = calls.find((args) => args[1] === "send" && args.includes("--text"));
     expect(textSend).toContain(TASK);
     expect(textSend).not.toContain("You review code.");

@@ -5,12 +5,25 @@ import { describe, expect, it } from "vitest";
 import { lookupProfile, parseProfileFrontmatter, scanProfiles } from "../src/profiles.js";
 
 describe("parseProfileFrontmatter", () => {
-  it("reads name, agent, and model, quoted or bare, plus the body", () => {
+  it("reads name, agent, model, and thinkingLevel, quoted or bare, plus the body", () => {
     expect(
       parseProfileFrontmatter(
-        '---\nname: scout\nagent: "codex"\nmodel: gpt-6-sol\n---\nYou are a scout.',
+        '---\nname: scout\nagent: "codex"\nmodel: gpt-6-sol\nthinkingLevel: high\n---\nYou are a scout.',
       ),
-    ).toEqual({ name: "scout", agent: "codex", model: "gpt-6-sol", body: "You are a scout." });
+    ).toEqual({
+      name: "scout",
+      agent: "codex",
+      model: "gpt-6-sol",
+      thinkingLevel: "high",
+      body: "You are a scout.",
+    });
+  });
+
+  it("ignores a thinkingLevel that is not one of the canonical levels", () => {
+    expect(parseProfileFrontmatter("---\nname: s\nthinkingLevel: turbo\n---\nb")).toEqual({
+      name: "s",
+      body: "b",
+    });
   });
 
   it("omits absent fields and returns the whole text as body without frontmatter", () => {
@@ -91,10 +104,14 @@ describe("lookupProfile", () => {
     await mkdir(join(agentDir, "profiles"));
     await writeFile(
       join(agentDir, "profiles", "scout.md"),
-      "---\nname: scout\nagent: Claude\nmodel: opus\n---\nBody.",
+      "---\nname: scout\nagent: Claude\nmodel: opus\nthinkingLevel: xhigh\n---\nBody.",
     );
     const result = await lookupProfile("scout", { agentDir });
-    expect(result.profile).toMatchObject({ agent: "claude", model: "opus" });
+    expect(result.profile).toMatchObject({
+      agent: "claude",
+      model: "opus",
+      thinkingLevel: "xhigh",
+    });
   });
 
   it("rejects an unknown agent value", async () => {

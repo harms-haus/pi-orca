@@ -14,6 +14,11 @@ import { join } from "node:path";
 
 const MAX_SUGGESTIONS = 8;
 
+/** Thinking levels shared with @harms-haus/pi-agent-profiles; forwarded to
+ * child CLIs as their effort settings. */
+export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+export type ThinkingLevel = (typeof THINKING_LEVELS)[number];
+
 /** CLI clients that can run a profile; `pi` is the default when `agent` is absent. */
 export type ProfileAgent = "pi" | "codex" | "claude";
 export const PROFILE_AGENTS: readonly ProfileAgent[] = ["pi", "codex", "claude"];
@@ -23,6 +28,7 @@ export interface ScannedProfile {
   name: string;
   agent?: string;
   model?: string;
+  thinkingLevel?: ThinkingLevel;
   body: string;
 }
 
@@ -31,6 +37,7 @@ export interface ResolvedProfile {
   name: string;
   agent: ProfileAgent;
   model?: string;
+  thinkingLevel?: ThinkingLevel;
   body: string;
 }
 
@@ -80,12 +87,15 @@ export interface ProfileFrontmatter {
   name?: string;
   agent?: string;
   model?: string;
+  thinkingLevel?: ThinkingLevel;
   body: string;
 }
 
 const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
 
-/** Extract `name`, `agent`, and `model` plus the body without a full YAML parser. */
+/** Extract `name`, `agent`, `model`, and `thinkingLevel` plus the body without
+ * a full YAML parser. Invalid thinking levels are ignored, matching
+ * @harms-haus/pi-agent-profiles. */
 export function parseProfileFrontmatter(markdown: string): ProfileFrontmatter {
   const match = markdown.match(FRONTMATTER_RE);
   if (match === null) return { body: markdown.trim() };
@@ -97,6 +107,14 @@ export function parseProfileFrontmatter(markdown: string): ProfileFrontmatter {
       if (value === undefined) continue;
       const unquoted = value.replace(/^["']|["']$/g, "").trim();
       if (unquoted) parsed[key] = unquoted;
+    }
+    if (parsed.thinkingLevel === undefined) {
+      const value = line.match(/^thinkingLevel:\s*(.*?)\s*$/)?.[1];
+      if (value !== undefined) {
+        const unquoted = value.replace(/^["']|["']$/g, "").trim();
+        if ((THINKING_LEVELS as readonly string[]).includes(unquoted))
+          parsed.thinkingLevel = unquoted as ThinkingLevel;
+      }
     }
   }
   return parsed;
@@ -151,6 +169,7 @@ export async function lookupProfile(
       name: scanned.name,
       agent: (agent as ProfileAgent) ?? "pi",
       ...(scanned.model ? { model: scanned.model } : {}),
+      ...(scanned.thinkingLevel ? { thinkingLevel: scanned.thinkingLevel } : {}),
       body: scanned.body,
     },
   };

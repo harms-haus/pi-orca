@@ -32,7 +32,9 @@ Spawn a subagent in a visible Orca terminal tab:
   profile: `pi` (default when absent) via `pi --agent-profile <profile>`;
   `claude` with the profile body as `--append-system-prompt`; `codex` with
   the body prepended to the first message (frontmatter `model` forwards to
-  `--model` on both).
+  `--model` on both; `thinkingLevel` forwards as claude `--effort`, with
+  `off`/`minimal` clamped to `low`, and as codex `model_reasoning_effort`,
+  with `off` mapped to `none`).
 - `worktree`: omit for the active worktree, `"new"` for a fresh child worktree,
   or an Orca selector (`path:/repo`, `id:…`, `name:…`).
 - `wait: true` polls until the child goes idle (3s slices, progress streamed)
@@ -43,13 +45,17 @@ Spawn a subagent in a visible Orca terminal tab:
   child.
 - The child keeps running in Orca regardless; monitor or follow up with
   `orca_terminal`.
-- First-run quirks of the foreign CLIs: claude shows a folder-trust dialog it
-  cannot skip in interactive mode (accept it once per folder — fresh
-  worktrees each need one click); codex readiness is a settle delay and its
-  completion an output-quiet watch, because a freshly launched codex never
-  reports tui-idle at rest (verified on codex 0.158 — turn starts are
-  observed natively via `terminal send --wait-submit`). Fast pi/claude turns
-  can report `send-unverified` with the screen as evidence.
+- Claude subagents launch with `--dangerously-skip-permissions`, overriding
+  configured auto mode. Startup accepts Claude's workspace-trust dialog for
+  the selected workspace, including fresh worktrees, then waits for idle
+  before sending the task. Only the recognized trust dialog is accepted;
+  authentication and other prompts still require manual input. Claude
+  persists trust itself. Use Claude subagents only in workspaces you trust:
+  they run without permission checks.
+- Codex readiness is a settle delay and its completion an output-quiet
+  watch, because a freshly launched codex never reports tui-idle at rest.
+  Turn starts are observed natively via `terminal send --wait-submit`.
+  Fast pi/claude turns can report `send-unverified` with the screen as evidence.
 
 ### `orca_terminal`
 
@@ -90,6 +96,7 @@ pnpm install
 pnpm test          # vitest unit suite
 pnpm exec jiti scripts/smoke.ts    # live smoke against a running Orca (creates/closes real tabs)
 pnpm exec jiti scripts/e2e.ts      # one real subagent round-trip (spawns a pi TUI)
+pnpm exec jiti scripts/e2e-claude.ts # fresh-folder trust, bypass mode, and real tool writes
 pnpm exec jiti scripts/review.ts   # full code-quality-review run via the subagent flow
 ```
 

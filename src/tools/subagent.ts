@@ -2,9 +2,10 @@ import type { ExtensionAPI, ThemeColor } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { runOrca, type OrcaRunOptions } from "../orca-cli.js";
-import { lookupProfile, type ResolvedProfile } from "../profiles.js";
+import { lookupProfile, type ResolvedProfile, type ThinkingLevel } from "../profiles.js";
 import { clipTail, orcaErrorMessage, renderResult, slugify } from "../util.js";
 import { readTerminalScreen, waitOnce, waitUntilIdle } from "./terminal.js";
+import { waitForClaudeReady } from "./claude-startup.js";
 
 /**
  * Spawn a profile-configured subagent in a visible Orca terminal tab. The
@@ -40,17 +41,38 @@ export function shq(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;
 }
 
+/** Map a profile thinkingLevel onto claude's --effort scale. Claude has no
+ * off/minimal, so those clamp to low rather than letting claude default to a
+ * higher effort than the profile asked for. */
+export function claudeEffort(level: ThinkingLevel): string {
+  return level === "off" || level === "minimal" ? "low" : level;
+}
+
+/** Map a profile thinkingLevel onto codex's model_reasoning_effort scale,
+ * which shares every level except off, spelled none. */
+export function codexReasoningEffort(level: ThinkingLevel): string {
+  return level === "off" ? "none" : level;
+}
+
 /** The command string that launches the profile's agent in an Orca terminal. */
 export function launchCommand(profile: ResolvedProfile): string {
   switch (profile.agent) {
     case "codex":
-      return ["codex", profile.model ? `--model ${shq(profile.model)}` : undefined]
+      return [
+        "codex",
+        profile.model ? `--model ${shq(profile.model)}` : undefined,
+        profile.thinkingLevel
+          ? `-c model_reasoning_effort=${codexReasoningEffort(profile.thinkingLevel)}`
+          : undefined,
+      ]
         .filter(Boolean)
         .join(" ");
     case "claude":
       return [
         "claude",
+        "--dangerously-skip-permissions",
         profile.model ? `--model ${shq(profile.model)}` : undefined,
+        profile.thinkingLevel ? `--effort ${claudeEffort(profile.thinkingLevel)}` : undefined,
         `--append-system-prompt ${shq(profile.body)}`,
       ]
         .filter(Boolean)
@@ -356,6 +378,15 @@ export async function runSubagent(
     notify("Giving codex a moment to start…");
     await new Promise((resolve) => setTimeout(resolve, delayMs));
     ready = true;
+  } else if (profile.agent === "claude") {
+    notify("Waiting for claude to become ready…");
+    ready = await waitForClaudeReady({
+      run,
+      handle,
+      totalMs: readiness.first + readiness.retry,
+      runOptions,
+      notify,
+    });
   } else {
     notify(`Waiting for ${profile.agent} to become ready…`);
     for (const timeoutMs of [readiness.first, readiness.retry]) {
@@ -533,7 +564,10 @@ export function registerOrcaSubagentTool(pi: ExtensionAPI, deps: OrcaSubagentDep
       "frontmatter's optional `agent` field selects the CLI client: `pi` (default) runs " +
       "`pi --agent-profile <profile>`; `codex` and `claude` launch those CLIs, with the profile " +
       "body passed as claude's --append-system-prompt or prepended to codex's first message " +
-      "(frontmatter `model` forwards to --model). Any valid profile name works, including " +
+      "(frontmatter `model` forwards to --model; `thinkingLevel` forwards as each CLI's " +
+      "effort setting). Claude runs with --dangerously-skip-permissions and startup accepts " +
+      "workspace trust for the selected workspace; use only workspaces you trust. " +
+      "Any valid profile name works, including " +
       "subagent profiles (agentProfile absent) that never appear in /agent. Optionally waits for " +
       "completion and returns the subagent's screen output. The child keeps running in Orca " +
       "regardless.",
